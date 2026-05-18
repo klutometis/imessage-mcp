@@ -16,17 +16,25 @@ import Logging
 public final class DatabaseReader: @unchecked Sendable {
     private let logger = Logger(label: "imessage-mcp.db")
     private let dbPool: DatabasePool
+    /// Optional contact name resolver. When set, `materialize()` /
+    /// `materializeChat()` populate `Message.senderName` and
+    /// `Chat.participantNames` from macOS AddressBook.
+    private let contacts: ContactsResolver?
 
     /// Apple epoch: 2001-01-01 00:00:00 UTC, in seconds since Unix epoch.
     /// chat.db stores `date` columns as nanoseconds since this epoch.
     public static let appleEpoch: TimeInterval = 978307200
 
-    public init(dbPath: String = "~/Library/Messages/chat.db") throws {
+    public init(
+        dbPath: String = "~/Library/Messages/chat.db",
+        contacts: ContactsResolver? = nil
+    ) throws {
         let expandedPath = NSString(string: dbPath).expandingTildeInPath
         var config = Configuration()
         config.readonly = true
         self.dbPool = try DatabasePool(path: expandedPath, configuration: config)
-        logger.info("opened chat.db read-only at \(expandedPath)")
+        self.contacts = contacts
+        logger.info("opened chat.db read-only at \(expandedPath)\(contacts != nil ? " (contacts resolver attached)" : "")")
     }
 
     /// Smoke method: returns the highest message ROWID in the database.
@@ -272,10 +280,16 @@ public final class DatabaseReader: @unchecked Sendable {
         }()
         let service: String? = row["service"]
 
+        let senderName: String? = {
+            guard !isFromMe, let resolver = contacts else { return nil }
+            return resolver.resolve(handle: senderPhone)
+        }()
+
         return Message(
             rowid: rowid,
             handleID: handleID,
             senderPhone: senderPhone,
+            senderName: senderName,
             text: text,
             timestamp: timestamp,
             isFromMe: isFromMe,
@@ -352,6 +366,11 @@ public final class DatabaseReader: @unchecked Sendable {
             """, arguments: [rowid, displayName, identifier, rowid])
         let lastMessage = try lastMsgRow.map { try self.materialize(row: $0, db: db) }
 
+        let participantNames: [String?] = {
+            guard let resolver = contacts else { return [] }
+            return participants.map { resolver.resolve(handle: $0) }
+        }()
+
         return Chat(
             rowid: rowid,
             identifier: identifier,
@@ -359,6 +378,7 @@ public final class DatabaseReader: @unchecked Sendable {
             style: style,
             service: service,
             participants: participants,
+            participantNames: participantNames,
             lastMessage: lastMessage,
             unreadCount: unread,
             lastReadAt: lastReadAt

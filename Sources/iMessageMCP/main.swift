@@ -26,9 +26,13 @@ LoggingSystem.bootstrap { label in
 let log = Logger(label: "imessage-mcp.main")
 
 let sender = MessageSender()
+// Contacts resolver runs on the same FDA grant as chat.db; it lazy-loads on
+// first lookup. Pass into DatabaseReader so search/listChats populate
+// senderName / participantNames.
+let contacts = ContactsResolver()
 let reader: DatabaseReader
 do {
-    reader = try DatabaseReader()
+    reader = try DatabaseReader(contacts: contacts)
     let max = try reader.maxMessageRowID()
     log.info("chat.db opened; max message rowid = \(max)")
 } catch {

@@ -46,6 +46,11 @@ public struct Message: Codable, Sendable {
     public let handleID: Int64
     /// For incoming: handle.id (phone/email). For outgoing: "me".
     public let senderPhone: String
+    /// Display name resolved from macOS Contacts for `senderPhone`, when
+    /// available. Nil for outgoing messages and for handles with no
+    /// matching contact card. Populated by `DatabaseReader.search()` /
+    /// `.listChats()` if a `ContactsResolver` is passed in.
+    public let senderName: String?
     /// Message body. Decoded from `text` column, or `attributedBody`
     /// via `MessageDecoder.decode()` when `text` is null.
     public let text: String?
@@ -72,6 +77,7 @@ public struct Message: Codable, Sendable {
         rowid: Int64,
         handleID: Int64,
         senderPhone: String,
+        senderName: String? = nil,
         text: String?,
         timestamp: Date,
         isFromMe: Bool,
@@ -86,6 +92,7 @@ public struct Message: Codable, Sendable {
         self.rowid = rowid
         self.handleID = handleID
         self.senderPhone = senderPhone
+        self.senderName = senderName
         self.text = text
         self.timestamp = timestamp
         self.isFromMe = isFromMe
@@ -107,7 +114,7 @@ public struct Message: Codable, Sendable {
 extension Message: CustomStringConvertible {
     public var description: String {
         var desc = """
-        Message(rowid=\(rowid), from=\(senderPhone), date=\(timestamp), text=\(text.map { "\"\($0)\"" } ?? "nil")
+        Message(rowid=\(rowid), from=\(senderName ?? senderPhone), date=\(timestamp), text=\(text.map { "\"\($0)\"" } ?? "nil")
         """
         if hasAttachments {
             desc += " attachments=\(attachments.count)"

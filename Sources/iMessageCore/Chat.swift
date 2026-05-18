@@ -17,6 +17,10 @@ public struct Chat: Codable, Sendable {
     /// `service_name` column: `"iMessage"`, `"SMS"`, `"RCS"`, etc.
     public let service: String?
     public let participants: [String]
+    /// Display names resolved from macOS Contacts, one per participant
+    /// (same order as `participants`). Entries are nil for unmatched
+    /// handles. Empty array when no resolver was passed in.
+    public let participantNames: [String?]
     /// Most recent message in the chat. Nil for empty chats (rare).
     public let lastMessage: Message?
     /// Count of `is_read=0 AND is_from_me=0` messages in this chat.
@@ -32,6 +36,7 @@ public struct Chat: Codable, Sendable {
         style: String,
         service: String?,
         participants: [String],
+        participantNames: [String?] = [],
         lastMessage: Message?,
         unreadCount: Int,
         lastReadAt: Date?
@@ -42,6 +47,7 @@ public struct Chat: Codable, Sendable {
         self.style = style
         self.service = service
         self.participants = participants
+        self.participantNames = participantNames
         self.lastMessage = lastMessage
         self.unreadCount = unreadCount
         self.lastReadAt = lastReadAt
