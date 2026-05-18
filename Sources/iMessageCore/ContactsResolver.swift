@@ -42,16 +42,11 @@ public final class ContactsResolver: @unchecked Sendable {
         if !loaded {
             try? loadSyncLocked()
         }
-        let log = Logger(label: "imessage-mcp.contacts")
         if handle.contains("@") {
-            let hit = emailIndex[handle.lowercased()]
-            log.debug("resolve email \(handle) -> \(hit ?? "nil")")
-            return hit
+            return emailIndex[handle.lowercased()]
         }
         let digits = Self.lastTenDigits(handle)
-        let hit = digits.map { phoneIndex[$0] } ?? nil
-        log.info("resolve phone \(handle) (digits=\(digits ?? "nil")) -> \(hit ?? "nil")")
-        return hit
+        return digits.map { phoneIndex[$0] } ?? nil
     }
 
     /// Force a re-scan of the AddressBook stores.
@@ -67,7 +62,6 @@ extension ContactsResolver {
     /// Walk every source under `sourcesRoot` and merge contacts.
     /// Caller must hold `lock`.
     fileprivate func loadSyncLocked() throws {
-        let log = Logger(label: "imessage-mcp.contacts")
         var phones: [String: String] = [:]
         var emails: [String: String] = [:]
 

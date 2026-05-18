@@ -284,8 +284,6 @@ public final class DatabaseReader: @unchecked Sendable {
             guard !isFromMe, let resolver = contacts else { return nil }
             return resolver.resolve(handle: senderPhone)
         }()
-        logger.info("materialize: rowid=\(rowid) senderPhone=\(senderPhone) isFromMe=\(isFromMe) senderName=\(senderName ?? "nil")")
-
         return Message(
             rowid: rowid,
             handleID: handleID,

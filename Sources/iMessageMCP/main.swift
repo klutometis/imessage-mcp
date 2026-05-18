@@ -85,6 +85,7 @@ func inlineAttachmentsIfSmall(_ atts: [Attachment]) -> [Attachment] {
 func messageWithInlinedAttachments(_ m: iMessageCore.Message) -> iMessageCore.Message {
     Message(
         rowid: m.rowid, handleID: m.handleID, senderPhone: m.senderPhone,
+        senderName: m.senderName,
         text: m.text, timestamp: m.timestamp, isFromMe: m.isFromMe, isRead: m.isRead,
         attachments: inlineAttachmentsIfSmall(m.attachments),
         chatID: m.chatID, chatName: m.chatName, service: m.service,
