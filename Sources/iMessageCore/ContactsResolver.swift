@@ -42,11 +42,16 @@ public final class ContactsResolver: @unchecked Sendable {
         if !loaded {
             try? loadSyncLocked()
         }
+        let log = Logger(label: "imessage-mcp.contacts")
         if handle.contains("@") {
-            return emailIndex[handle.lowercased()]
+            let hit = emailIndex[handle.lowercased()]
+            log.debug("resolve email \(handle) -> \(hit ?? "nil")")
+            return hit
         }
         let digits = Self.lastTenDigits(handle)
-        return digits.map { phoneIndex[$0] } ?? nil
+        let hit = digits.map { phoneIndex[$0] } ?? nil
+        log.info("resolve phone \(handle) (digits=\(digits ?? "nil")) -> \(hit ?? "nil")")
+        return hit
     }
 
     /// Force a re-scan of the AddressBook stores.
