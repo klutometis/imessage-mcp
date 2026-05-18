@@ -292,7 +292,10 @@ public final class DatabaseReader: @unchecked Sendable {
     private func materializeChat(row: Row, db: Database) throws -> Chat {
         let rowid: Int64 = row["rowid"]
         let identifier: String = row["chat_identifier"] ?? ""
-        let displayName: String? = row["display_name"]
+        let displayName: String? = {
+            let s: String? = row["display_name"]
+            return (s?.isEmpty == false) ? s : nil
+        }()
         let styleCode: Int64 = row["style"] ?? 0
         let style = (styleCode == 43) ? "group" : "1:1"
         let service: String? = row["service_name"]
@@ -343,6 +346,7 @@ public final class DatabaseReader: @unchecked Sendable {
             WHERE cmj.chat_id = ?
               AND m.is_empty = 0
               AND m.item_type = 0
+              AND m.associated_message_guid IS NULL   -- exclude tapbacks/reactions
             ORDER BY m.date DESC
             LIMIT 1
             """, arguments: [rowid, displayName, identifier, rowid])
