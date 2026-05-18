@@ -62,6 +62,7 @@ extension ContactsResolver {
     /// Walk every source under `sourcesRoot` and merge contacts.
     /// Caller must hold `lock`.
     fileprivate func loadSyncLocked() throws {
+        let log = Logger(label: "imessage-mcp.contacts")
         var phones: [String: String] = [:]
         var emails: [String: String] = [:]
 
