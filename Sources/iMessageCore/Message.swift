@@ -1,90 +1,119 @@
 import Foundation
 
-/// A file attachment on an iMessage (voice memo, image, video, etc.).
+/// A file attachment on an iMessage (voice memo, image, video, sticker, etc.).
 ///
-/// Paths are stored in the Messages database with a `~` prefix
-/// (e.g. `~/Library/Messages/Attachments/XX/XX/GUID/filename.ext`).
-/// The `filename` field here is the **expanded** absolute path — tilde
-/// expansion is performed in `DatabaseMonitor.fetchAttachments()`.
+/// Paths in chat.db are stored with a `~` prefix; `DatabaseReader` expands
+/// them at fetch time so callers see absolute paths.
 public struct Attachment: Codable, Sendable {
-    public init(filename: String, mimeType: String?, uti: String?, totalBytes: Int64) {
+    public let rowid: Int64
+    public let filename: String
+    public let mimeType: String?
+    public let uti: String?
+    public let totalBytes: Int64
+    public let isSticker: Bool
+    /// Optional inline content (base64-encoded). Populated by the MCP layer
+    /// for small images so the LLM can see them without an extra fetch.
+    /// `DatabaseReader` always leaves this nil; the populating happens in
+    /// `iMessageMCP/main.swift` based on policy (mime + size).
+    public let contentBase64: String?
+
+    public init(
+        rowid: Int64,
+        filename: String,
+        mimeType: String?,
+        uti: String?,
+        totalBytes: Int64,
+        isSticker: Bool = false,
+        contentBase64: String? = nil
+    ) {
+        self.rowid = rowid
         self.filename = filename
         self.mimeType = mimeType
         self.uti = uti
         self.totalBytes = totalBytes
+        self.isSticker = isSticker
+        self.contentBase64 = contentBase64
     }
-
-    /// Absolute filesystem path (tilde-expanded) to the attachment file.
-    public let filename: String
-    /// MIME type from the `attachment` table, e.g. `"audio/x-caf"`, `"image/jpeg"`.
-    public let mimeType: String?
-    /// Uniform Type Identifier, e.g. `"com.apple.coreaudio-format"`.
-    public let uti: String?
-    /// File size in bytes. May be 0 if the database row hasn't been fully populated yet.
-    public let totalBytes: Int64
 }
 
-/// An iMessage read from `chat.db`.
+/// An iMessage row from chat.db, materialized for MCP consumption.
 ///
-/// Produced by `DatabaseReader` SQL queries; consumed by `iMessageMCP` tool handlers.
+/// Returned by `DatabaseReader.search()` and `.listChats()` (the latter
+/// puts the most recent one inline as `Chat.lastMessage`).
 public struct Message: Codable, Sendable {
-    public init(rowid: Int64, handleID: Int64, senderPhone: String, text: String?, timestamp: Date, isFromMe: Bool, attachments: [Attachment], cacheHasAttachments: Bool) {
+    public let rowid: Int64
+    /// `message.handle_id` FK; 0 for outgoing (no handle).
+    public let handleID: Int64
+    /// For incoming: handle.id (phone/email). For outgoing: "me".
+    public let senderPhone: String
+    /// Message body. Decoded from `text` column, or `attributedBody`
+    /// via `MessageDecoder.decode()` when `text` is null.
+    public let text: String?
+    public let timestamp: Date
+    public let isFromMe: Bool
+    public let isRead: Bool
+    public let attachments: [Attachment]
+
+    // --- Optional, populated by search/listChats; nil from other code paths ---
+
+    /// Foreign key into the `chat` table. Nil for orphan messages (rare).
+    public let chatID: Int64?
+    /// Convenience: the chat's display_name or chat_identifier, for inline
+    /// display without a join lookup.
+    public let chatName: String?
+    /// Service the message used: "iMessage", "SMS", "RCS", etc.
+    public let service: String?
+    /// `message.date_edited`, if the user edited this message after sending.
+    public let editedAt: Date?
+    /// `message.date_retracted`, if the user "unsent" this message.
+    public let retractedAt: Date?
+
+    public init(
+        rowid: Int64,
+        handleID: Int64,
+        senderPhone: String,
+        text: String?,
+        timestamp: Date,
+        isFromMe: Bool,
+        isRead: Bool,
+        attachments: [Attachment],
+        chatID: Int64? = nil,
+        chatName: String? = nil,
+        service: String? = nil,
+        editedAt: Date? = nil,
+        retractedAt: Date? = nil
+    ) {
         self.rowid = rowid
         self.handleID = handleID
         self.senderPhone = senderPhone
         self.text = text
         self.timestamp = timestamp
         self.isFromMe = isFromMe
+        self.isRead = isRead
         self.attachments = attachments
-        self.cacheHasAttachments = cacheHasAttachments
+        self.chatID = chatID
+        self.chatName = chatName
+        self.service = service
+        self.editedAt = editedAt
+        self.retractedAt = retractedAt
     }
 
-    public let rowid: Int64
-
-    /// Foreign key into the `handle` table. Used for deferred phone number resolution:
-    /// iMessage may commit the message row before the handle row in a separate transaction,
-    /// leaving `senderPhone` as `"unknown"`. `DatabaseMonitor` uses this ID to re-query
-    /// in a fresh read transaction.
-    public let handleID: Int64
-
-    public let senderPhone: String
-    public let text: String?
-    public let timestamp: Date
-    public let isFromMe: Bool
-    public let attachments: [Attachment]
-
-    /// Raw `cache_has_attachments` flag from the database. **Unreliable** for detecting
-    /// whether a message actually has attachments — iMessage sets this to `0` initially
-    /// and updates it in a later transaction. Callers reading message rows
-    /// shouldn't trust this flag; check `attachments.isEmpty` instead.
-    public let cacheHasAttachments: Bool
-    
-    /// The message text content
-    public var content: String {
-        text ?? ""
-    }
-    
-    /// Whether this message has file attachments
-    public var hasAttachments: Bool {
-        !attachments.isEmpty
-    }
+    /// Convenience: the message text content (empty string if null).
+    public var content: String { text ?? "" }
+    /// Convenience: any attachments at all.
+    public var hasAttachments: Bool { !attachments.isEmpty }
 }
 
 extension Message: CustomStringConvertible {
     public var description: String {
         var desc = """
-        Message Detected:
-           Row ID: \(rowid)
-           From: \(senderPhone)
-           Content: "\(content)"
-           Timestamp: \(timestamp)
-           Is From Me: \(isFromMe)
+        Message(rowid=\(rowid), from=\(senderPhone), date=\(timestamp), text=\(text.map { "\"\($0)\"" } ?? "nil")
         """
         if hasAttachments {
-            desc += "\n   Attachments: \(attachments.count)"
-            for (i, att) in attachments.enumerated() {
-                desc += "\n     [\(i)] \(att.filename) (\(att.mimeType ?? "unknown") \(att.totalBytes) bytes)"
-            }
+            desc += " attachments=\(attachments.count)"
+        }
+        if let chatName = chatName {
+            desc += " chat=\(chatName)"
         }
         return desc
     }

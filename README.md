@@ -11,10 +11,31 @@ interface using the official [Swift MCP SDK][swift-sdk].
 
 ## Status (2026-05-18)
 
-- ✅ `send_imessage(recipient, message)` — works end-to-end.
-- ⏳ `search_imessages`, `list_imessage_chats`, `get_imessage_attachment` —
-  designed (see `~/prg/mcp-gateway/plans/mcp-over-wss.md`), not yet
-  implemented. `DatabaseReader` skeleton is in place.
+All four verbs live:
+
+- ✅ `send_imessage(recipient, message)` — AppleScript via Messages.app
+- ✅ `search_imessages(text?, sender?, chat?, since?, until?, has_attachment?, from_me?, limit?)` — SQL over `chat.db`, returns full text inline, small images base64-inlined
+- ✅ `list_imessage_chats(limit?)` — recent conversations with last-message preview
+- ✅ `get_imessage_attachment(message_rowid, attachment_index?, max_inline_bytes?)` — explicit bytes fetch
+
+### Known limitations
+
+- `search_imessages(text=...)` matches against the `message.text` SQL
+  column only. Modern macOS often leaves `text` null and stores the body
+  in `message.attributedBody` (a TypedStream blob); those messages
+  display correctly in results (we decode via Madrid) but won't be
+  found by text substring. Workaround for "fully searchable" mode TBD
+  (post-process all-recent-N, or maintain an FTS5 mirror).
+- Voice memo attachments often have null `mime_type` in chat.db; only
+  the UTI (`com.apple.coreaudio-format`) is populated. Inlining policy
+  uses `mime.hasPrefix("image/")`, so audio is correctly skipped, but
+  the LLM sees no `mimeType` field for it.
+- Inline image cap: 1MB (per attachment). Larger images: caller fetches
+  explicitly via `get_imessage_attachment` (cap there is 5MB default,
+  caller-configurable).
+- No `mark_read` verb — implicit on read (the SQL queries are read-only;
+  Messages.app updates `is_read` when the user opens the conversation
+  in the GUI). TODO if needed: AppleScript marker.
 
 ## Why Swift (instead of Node / Python)
 
