@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import Logging
 
 /// Resolves chat.db handles (phone numbers / iCloud emails) to display
 /// names by reading macOS's AddressBook sqlite stores.
@@ -61,18 +62,31 @@ extension ContactsResolver {
     /// Walk every source under `sourcesRoot` and merge contacts.
     /// Caller must hold `lock`.
     fileprivate func loadSyncLocked() throws {
+        let log = Logger(label: "imessage-mcp.contacts")
         var phones: [String: String] = [:]
         var emails: [String: String] = [:]
 
         let fm = FileManager.default
         let sources = (try? fm.contentsOfDirectory(at: sourcesRoot,
             includingPropertiesForKeys: nil)) ?? []
+        log.info("scanning \(sources.count) AddressBook source(s) under \(sourcesRoot.path)")
         for sourceDir in sources {
             let db = sourceDir.appendingPathComponent("AddressBook-v22.abcddb")
             guard fm.fileExists(atPath: db.path) else { continue }
-            try loadOne(dbPath: db.path, into: &phones, intoEmails: &emails)
+            do {
+                let before = (phones.count, emails.count)
+                try loadOne(dbPath: db.path, into: &phones, intoEmails: &emails)
+                let dp = phones.count - before.0
+                let de = emails.count - before.1
+                log.info("  \(sourceDir.lastPathComponent): +\(dp) phones, +\(de) emails")
+            } catch {
+                // Don't abort the whole load on one bad source (empty DBs,
+                // missing tables, etc.) — just skip and continue.
+                log.warning("  \(sourceDir.lastPathComponent): skipped (\(error))")
+            }
         }
 
+        log.info("contacts loaded: \(phones.count) phones, \(emails.count) emails")
         self.phoneIndex = phones
         self.emailIndex = emails
         self.loaded = true
