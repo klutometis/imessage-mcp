@@ -188,6 +188,89 @@ public final class DatabaseReader: @unchecked Sendable {
         }
     }
 
+    // MARK: - Send support
+
+    /// Existing chats a send `recipient` could mean, most recently active
+    /// first. Matches `chat.guid` (`any;+;1150bd…`, which is what
+    /// AppleScript's `chat id` takes), `chat.chat_identifier` (the
+    /// `identifier` that `listChats` returns — a phone/email for 1:1, an
+    /// opaque id for groups), or a group's display name.
+    ///
+    /// Empty means no conversation exists yet, which is normal for a
+    /// phone/email nobody has texted from this Mac; the sender then
+    /// addresses the participant directly.
+    public func findChats(_ recipient: String) throws -> [ChatRef] {
+        try dbPool.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT c.ROWID AS rowid, c.guid, c.chat_identifier, c.display_name, c.style,
+                       (SELECT MAX(cmj.message_date) FROM chat_message_join cmj
+                         WHERE cmj.chat_id = c.ROWID) AS last_message_date
+                FROM chat c
+                WHERE c.guid = ? OR c.chat_identifier = ?
+                   OR (c.style = 43 AND c.display_name = ?)
+                ORDER BY last_message_date DESC
+                """, arguments: [recipient, recipient, recipient])
+            return try rows.map { row in
+                let rowid: Int64 = row["rowid"]
+                let participants = try String.fetchAll(db, sql: """
+                    SELECT h.id FROM chat_handle_join chj
+                    JOIN handle h ON h.ROWID = chj.handle_id
+                    WHERE chj.chat_id = ? ORDER BY h.id
+                    """, arguments: [rowid])
+                let displayName: String? = row["display_name"]
+                return ChatRef(
+                    guid: row["guid"] ?? "",
+                    identifier: row["chat_identifier"] ?? "",
+                    displayName: (displayName?.isEmpty == false) ? displayName : nil,
+                    isGroup: (row["style"] as Int64? ?? 0) == 43,
+                    participants: participants,
+                    participantNames: participants.map { contacts?.resolve(handle: $0) }
+                )
+            }
+        }
+    }
+
+    /// The first outgoing message after `afterRowID` whose body is `text`
+    /// (whitespace-trimmed), or — failing that — the first outgoing message
+    /// after it in `chatGUID`. This is how a send is confirmed: osascript
+    /// exits 0 for a send to a participant that does not exist, so the only
+    /// evidence a message went anywhere is the row Messages writes for it.
+    ///
+    /// The body is decoded from `attributedBody` when `text` is null, which
+    /// modern macOS does for a good share of outgoing messages.
+    public func findOutgoing(afterRowID: Int64, text: String, chatGUID: String?) throws -> OutgoingStatus? {
+        let want = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try dbPool.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT m.ROWID AS rowid, m.text, m.attributedBody, m.is_sent, m.is_delivered,
+                       m.error, c.guid AS chat_guid
+                FROM message m
+                LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+                LEFT JOIN chat c ON c.ROWID = cmj.chat_id
+                WHERE m.ROWID > ? AND m.is_from_me = 1 AND m.item_type = 0
+                  AND m.associated_message_guid IS NULL
+                ORDER BY m.ROWID
+                """, arguments: [afterRowID])
+            let statuses = rows.map { row -> (OutgoingStatus, String?) in
+                var body: String? = row["text"]
+                if body == nil, let ab: Data = row["attributedBody"] {
+                    body = MessageDecoder.decode(attributedBody: ab)
+                }
+                return (OutgoingStatus(
+                    rowid: row["rowid"],
+                    chatGUID: row["chat_guid"],
+                    isSent: (row["is_sent"] as Int64? ?? 0) != 0,
+                    isDelivered: (row["is_delivered"] as Int64? ?? 0) != 0,
+                    error: row["error"] ?? 0
+                ), body?.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            if let hit = statuses.first(where: { $0.1 == want }) { return hit.0 }
+            if let chatGUID = chatGUID,
+               let hit = statuses.first(where: { $0.0.chatGUID == chatGUID }) { return hit.0 }
+            return nil
+        }
+    }
+
     // MARK: - Attachment fetch
 
     /// Read raw bytes of one attachment of one message.

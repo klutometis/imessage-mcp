@@ -25,7 +25,6 @@ LoggingSystem.bootstrap { label in
 }
 let log = Logger(label: "imessage-mcp.main")
 
-let sender = MessageSender()
 // Contacts resolver runs on the same FDA grant as chat.db; it lazy-loads on
 // first lookup. Pass into DatabaseReader so search/listChats populate
 // senderName / participantNames.
@@ -39,6 +38,9 @@ do {
     log.error("failed to open chat.db: \(error)")
     exit(1)
 }
+// The sender reads chat.db to resolve group chats and to confirm each send
+// actually produced an outgoing message.
+let sender = MessageSender(db: reader)
 
 // ───────────────────────────── helpers ─────────────────────────────
 
@@ -119,19 +121,27 @@ await server.withMethodHandler(ListTools.self) { _ in
         Tool(
             name: "send_imessage",
             description:
-                "Send an iMessage from Peter's Mac via Messages.app. " +
-                "`recipient` is a phone (e.g. +16505551234) or iCloud email; " +
-                "`message` is the body text.",
+                "Send an iMessage from Peter's Mac via Messages.app, to a person or a group chat. " +
+                "`recipient` is a phone (e.g. +16505551234), an iCloud email, or an existing chat: " +
+                "a group's `identifier` from list_imessage_chats, its chat guid, or its display name. " +
+                "Each send is confirmed from chat.db: the result is JSON with `status` " +
+                "(`sent`, `delivered`, or `pending`) and the chat it landed in, including its " +
+                "participants. It is an error, not a success, if Messages wrote no outgoing message " +
+                "or marked it Not Delivered. `dry_run: true` resolves the recipient without sending.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "recipient": .object([
                         "type": .string("string"),
-                        "description": .string("Phone (+16505551234) or iCloud email of the recipient.")
+                        "description": .string("Phone (+16505551234), iCloud email, or a group chat's identifier / guid / display name.")
                     ]),
                     "message": .object([
                         "type": .string("string"),
                         "description": .string("Message body to send.")
+                    ]),
+                    "dry_run": .object([
+                        "type": .string("boolean"),
+                        "description": .string("If true, report where the message would go (chat and participants) without sending it.")
                     ])
                 ]),
                 "required": .array([.string("recipient"), .string("message")])
@@ -204,10 +214,15 @@ await server.withMethodHandler(CallTool.self) { params in
               !recipient.isEmpty, !message.isEmpty else {
             return .init(content: [.text("send_imessage requires non-empty `recipient` and `message`.")], isError: true)
         }
+        let dryRun = params.arguments?["dry_run"]?.boolValue ?? false
         do {
-            try await sender.send(to: recipient, message: message)
-            log.info("sent iMessage to \(recipient) (\(message.count) chars)")
-            return .init(content: [.text("Sent iMessage to \(recipient).")], isError: false)
+            if dryRun {
+                let receipt = try await sender.dryRun(to: recipient)
+                return .init(content: [.text(toJSONText(receipt))], isError: false)
+            }
+            let receipt = try await sender.send(to: recipient, message: message)
+            log.info("\(receipt.status) iMessage to \(recipient) (\(message.count) chars), rowid \(receipt.messageRowid.map(String.init) ?? "-")")
+            return .init(content: [.text(toJSONText(receipt))], isError: false)
         } catch {
             log.error("send failed: \(error)")
             return .init(content: [.text("Failed to send: \(error)")], isError: true)
