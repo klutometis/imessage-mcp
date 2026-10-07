@@ -53,7 +53,7 @@ public struct OutgoingStatus: Codable, Sendable {
 public struct SendReceipt: Codable, Sendable {
     /// `"sent"`, `"delivered"`, `"pending"` (Messages wrote the row but
     /// Apple's servers had not acknowledged it before we stopped watching),
-    /// or `"dry_run"`.
+    /// or `"unconfirmed"` (no chat.db to check against).
     public let status: String
     public let recipient: String
     /// `"chat"` (addressed by chat id — every group) or `"participant"`

@@ -140,30 +140,6 @@ public actor MessageSender {
                                  afterRowID: before, db: db)
     }
 
-    /// Resolve `recipient` and, for a chat, have Messages itself look the
-    /// chat up — everything a send does except sending.
-    public func dryRun(to recipient: String) async throws -> SendReceipt {
-        let target = try resolve(recipient)
-        var note: String
-        switch target {
-        case .chat:
-            try await ensureMessagesIsRunning()
-            let id = try await executeAppleScript("""
-            tell application "Messages"
-            \(targetScript(target))
-                return id of theTarget
-            end tell
-            """).trimmingCharacters(in: .whitespacesAndNewlines)
-            note = "Messages resolved the chat as \(id). Nothing was sent."
-        case .participant(_, let chat):
-            note = chat == nil
-                ? "No existing conversation; Messages would start one with this handle. Nothing was sent."
-                : "Would send to this handle's existing conversation. Nothing was sent."
-        }
-        return SendReceipt(status: "dry_run", recipient: recipient, addressedAs: target.addressedAs,
-                           chat: target.chat, messageRowid: nil, note: note)
-    }
-
     /// Watch chat.db for the row Messages writes for this send.
     private func confirm(recipient: String, message: String, target: Target,
                          afterRowID: Int64, db: DatabaseReader) async throws -> SendReceipt {

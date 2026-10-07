@@ -122,12 +122,8 @@ await server.withMethodHandler(ListTools.self) { _ in
             name: "send_imessage",
             description:
                 "Send an iMessage from Peter's Mac via Messages.app, to a person or a group chat. " +
-                "`recipient` is a phone (e.g. +16505551234), an iCloud email, or an existing chat: " +
-                "a group's `identifier` from list_imessage_chats, its chat guid, or its display name. " +
-                "Each send is confirmed from chat.db: the result is JSON with `status` " +
-                "(`sent`, `delivered`, or `pending`) and the chat it landed in, including its " +
-                "participants. It is an error, not a success, if Messages wrote no outgoing message " +
-                "or marked it Not Delivered. `dry_run: true` resolves the recipient without sending.",
+                "`recipient` is a phone number (e.g. +16505551234), an iCloud email, or a group chat's " +
+                "`identifier` from list_imessage_chats. Returns where it landed; an error means nothing was sent.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -138,10 +134,6 @@ await server.withMethodHandler(ListTools.self) { _ in
                     "message": .object([
                         "type": .string("string"),
                         "description": .string("Message body to send.")
-                    ]),
-                    "dry_run": .object([
-                        "type": .string("boolean"),
-                        "description": .string("If true, report where the message would go (chat and participants) without sending it.")
                     ])
                 ]),
                 "required": .array([.string("recipient"), .string("message")])
@@ -214,12 +206,15 @@ await server.withMethodHandler(CallTool.self) { params in
               !recipient.isEmpty, !message.isEmpty else {
             return .init(content: [.text("send_imessage requires non-empty `recipient` and `message`.")], isError: true)
         }
-        let dryRun = params.arguments?["dry_run"]?.boolValue ?? false
+        // A send never ignores an argument it does not understand. On
+        // 2026-10-06 a `dry_run` this server could not read was dropped and
+        // the message went out for real; anything beyond recipient/message
+        // is now refused before Messages is touched.
+        let unexpected = (params.arguments ?? [:]).keys.filter { $0 != "recipient" && $0 != "message" }.sorted()
+        if !unexpected.isEmpty {
+            return .init(content: [.text("send_imessage takes only `recipient` and `message`; got unexpected \(unexpected.map { "`\($0)`" }.joined(separator: ", ")). Nothing was sent.")], isError: true)
+        }
         do {
-            if dryRun {
-                let receipt = try await sender.dryRun(to: recipient)
-                return .init(content: [.text(toJSONText(receipt))], isError: false)
-            }
             let receipt = try await sender.send(to: recipient, message: message)
             log.info("\(receipt.status) iMessage to \(recipient) (\(message.count) chars), rowid \(receipt.messageRowid.map(String.init) ?? "-")")
             return .init(content: [.text(toJSONText(receipt))], isError: false)

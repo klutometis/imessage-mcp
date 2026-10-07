@@ -13,7 +13,7 @@ interface using the official [Swift MCP SDK][swift-sdk].
 
 All four verbs live:
 
-- ✅ `send_imessage(recipient, message, dry_run?)` — AppleScript via Messages.app,
+- ✅ `send_imessage(recipient, message)` — AppleScript via Messages.app,
   to a phone/email *or a group chat* (its `identifier` from
   `list_imessage_chats`, its `any;+;…` guid, or its display name), and
   **confirmed from chat.db**: the result is a JSON receipt (`sent` /
@@ -27,12 +27,24 @@ All four verbs live:
   writes does. Groups never set `is_delivered`, so `sent` is as far as a group
   receipt goes.
 
+  No `dry_run`, on purpose, and any argument besides `recipient`/`message` is
+  refused with nothing sent. A `dry_run` existed for one day (2026-10-06): a
+  caller whose schema predated it passed one this server could not read, the
+  handler defaulted to sending, and "dry run, not sent" went to a real group.
+  It was a debugging aid that had leaked into the production signature; none
+  of the other send tools (WhatsApp, LinkedIn, Chat, Gmail) carry one. To see
+  who a group reaches before sending, `list_imessage_chats` already lists the
+  participants. Test sends go to Peter's own number (`apple@pcd.la`).
+
   Testing over ssh: sshd has Full Disk Access on the Macly mini but not
   Automation → Messages, so any osascript from an ssh shell hangs on a TCC
   prompt nobody can answer. The grants belong to the uv `python3.11` that
   runs wss-bridge, so run tests as a launchd job under that interpreter
-  (`launchctl submit -l <label> -- <python3.11> script.py`), which is how the
-  group `dry_run` was verified.
+  (`launchctl submit -l <label> -- <python3.11> script.py`). That was true on
+  2026-10-06; by 2026-10-07 `osascript -e 'tell application "Messages" to get
+  name'` answered instantly over ssh, so the prompt was approved at the Mac.
+  Check with that one-liner before assuming either way — and remember that
+  if it answers, an ssh shell can now send real messages.
 - ✅ `search_imessages(text?, sender?, chat?, since?, until?, has_attachment?, from_me?, limit?)` — SQL over `chat.db`, returns full text inline, small images base64-inlined
 - ✅ `list_imessage_chats(limit?)` — recent conversations with last-message preview
 - ✅ `get_imessage_attachment(message_rowid, attachment_index?, max_inline_bytes?)` — explicit bytes fetch
